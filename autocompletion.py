@@ -1,13 +1,26 @@
 import math
 import json
 import random
+from collections import defaultdict
+
+STOPWORDS = {
+    'le', 'la', 'les', 'un', 'une', 'de', 'du', 'des', 'et', 'en', 'à', 'au', 'aux', 
+    'ce', 'cet', 'cette', 'ces', 'mon', 'ma', 'mes', 'ton', 'ta', 'tes', 'son', 'sa', 
+    'ses', 'notre', 'nos', 'votre', 'vos', 'leur', 'leurs', 'se', 'ne', 'pas', 'plus', 
+    'ou', 'mais', 'que', 'qui', 'quoi', 'dont', 'où', 'avec', 'dans', 'sur', 'sous', 
+    'par', 'pour', 'sans', 'entre', 'avant', 'après', 'depuis', 'comme', 'donc', 'alors',
+    'si', 'car', 'ainsi', 'or', 'ni', 'soit', 'tandis', 'même', 'lui', 'eux', 'elle', 'a',
+    'elles', 'on', 'nous', 'vous', 'ils', 'elles', 'y',  'autre', 'autres', 'chacun', 
+    'aucun', 'aucune', 'rien', 'peu', 'très', 'moins', 'trop', 'assez', 'tel', 'telle',
+    'tels', 'telles', 'ci', 'là', 'me', 'te', 'se', 'moi', 'toi', 'si', 'est', 'd\'', 'l\''
+}
 
 class NGRAM:
     def __init__(self):
         self.uni_grams = {'<s>': 0}
         self.bi_grams = {}
         self.tri_grams = {}
-        self.continuation_counts = {}
+        self.continuation_counts = defaultdict(int)
 
     def entrainer(self, data):
         self.uni_grams = {'<s>': 0}
@@ -62,19 +75,16 @@ class NGRAM:
 
         unique_continuations = self.continuation_counts.get(current, 1)
 
-        # Lissage de Kneser-Ney pour les trigrammes
-        if prev_prev and bigram_prev_count > 0:
-            trigram_prob = max(trigram_count - D, 0) / bigram_prev_count + \
-                           (D / bigram_prev_count) * (bigram_count / unigram_count if unigram_count else 1)
-
-            bigram_prob = max(bigram_count - D, 0) / unigram_count + \
-                          (D / unigram_count) * (unique_continuations / vocab_size)
-
-            score = 0.7 * trigram_prob + 0.3 * bigram_prob  # Pondération
-        else:
-            # Lissage de Kneser-Ney pour les bigrammes
-            score = max(bigram_count - D, 0) / (unigram_count if unigram_count else 1) + \
-                    (D / (unigram_count if unigram_count else 1)) * (unique_continuations / vocab_size)
+        # Coefficients dynamiques basés sur les fréquences
+        λ1 = 0.7 if trigram_count > 0 else 0.4
+        λ2 = 0.2 if bigram_count > 0 else 0.3
+        
+        # Lissage de Kneser-Ney avec interpolation
+        trigram_prob = max(trigram_count - D, 0) / bigram_prev_count if bigram_prev_count else 0
+        bigram_prob = max(bigram_count - D, 0) / unigram_count if unigram_count else 0
+        unigram_prob = unique_continuations / vocab_size
+        
+        score = λ1 * trigram_prob + λ2 * bigram_prob + (1 - λ1 - λ2) * unigram_prob
 
         return math.log(score) if score > 0 else float('-inf')
 
@@ -107,14 +117,15 @@ class Autocompletion():
         f = open(url, 'r', encoding='utf-8')
         data = []
         for l in f:
-            phrase = l.strip().lower().split()
-            if len(phrase) > 0:
+            phrase = [mot for mot in l.strip().lower().split() if mot not in STOPWORDS]
+            if phrase:
                 data.append(phrase)
         f.close()
         self.modele.entrainer(data)
 
     def estimer(self, phrase, nbr):
-        mots_scores = self.modele.estimer(phrase.strip().lower().split())
+        mots = [mot for mot in phrase.strip().lower().split() if mot not in STOPWORDS]
+        mots_scores = self.modele.estimer(mots)
         return mots_scores[:nbr]
 
     def charger_modele(self, url):
@@ -147,7 +158,9 @@ class Autocompletion():
             test = S[i]
             print('-> Probabilité(\033[95m', test[1], '\033[0m|',test[0], ')')
             res = self.estimer(test[0], m)
-            print('\033[38;5;206mSuggestions :\033[0m', res)
+            print('\033[38;5;206mSuggestions :\033[0m', end=" ")
+            print(", ".join(f"\033[38;5;45m{mot}\033[0m: {score:.6f}" for mot, score in res))
+
             words = [e[0] for e in res]
             try:
                 i = words.index(test[1]) + 1
