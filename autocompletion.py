@@ -6,10 +6,12 @@ class LaplaceBiGram:
     def __init__(self):
         self.uni_grams = {'<s>': 0}
         self.bi_grams = {}
+        self.tri_grams = {}
 
     def entrainer(self, data):
         self.uni_grams = {'<s>': 0}
         self.bi_grams = {}
+        self.tri_grams = {}
 
         for phrase in data:
             if not phrase:
@@ -17,6 +19,7 @@ class LaplaceBiGram:
 
             self.uni_grams['<s>'] += 1
             prev = '<s>'
+            prev_prev = None 
 
             for mot in phrase:
                 # Compter les unigrammes
@@ -30,24 +33,44 @@ class LaplaceBiGram:
                     self.bi_grams[bigram_key] = 0
                 self.bi_grams[bigram_key] += 1
 
+                # Compter les trigrammes
+                if prev_prev is not None:
+                    trigram_key = f"{prev_prev}|{prev}|{mot}"
+                    if trigram_key not in self.tri_grams:
+                        self.tri_grams[trigram_key] = 0
+                    self.tri_grams[trigram_key] += 1
+
+                prev_prev = prev
                 prev = mot
 
-    def noter(self, past, current):
+    def noter(self, past, current, prev_prev=None):
         bigram_key = f"{past}|{current}"
+        trigram_key = f"{prev_prev}|{past}|{current}" if prev_prev else None
+
         bigram_count = self.bi_grams.get(bigram_key, 0)
+        trigram_count = self.tri_grams.get(trigram_key, 0) if trigram_key else 0
         unigram_count = self.uni_grams.get(past, 0)
+        bigram_prev_count = self.bi_grams.get(f"{prev_prev}|{past}", 0) if prev_prev else 0
         vocab_size = len(self.uni_grams)
 
-        # Lissage de Laplace
-        return math.log((bigram_count + 1) / (unigram_count + vocab_size ))
+        # Combinaison des scores avec lissage de Laplace
+        if prev_prev and bigram_prev_count > 0:
+            trigram_score = (trigram_count + 1) / (bigram_prev_count + vocab_size)
+            bigram_score = (bigram_count + 1) / (unigram_count + vocab_size)
+            score = 0.6 * trigram_score + 0.4 * bigram_score  # Pondération
+        else:
+            score = (bigram_count + 1) / (unigram_count + vocab_size)
+
+        return math.log(score)
 
     def estimer(self, mots):
         dernier_mot = mots[-1] if mots else '<s>'
+        avant_dernier_mot = mots[-2] if len(mots) > 1 else None
         mots_scores = []
 
         for mot in self.uni_grams.keys():
             if mot != '<s>':
-                score = self.noter(dernier_mot, mot)
+                score = self.noter(dernier_mot, mot, avant_dernier_mot)
                 mots_scores.append((mot, score))
 
         return sorted(mots_scores, key=lambda tab: tab[1], reverse=True)
@@ -122,6 +145,6 @@ class Autocompletion():
 if __name__ == '__main__':
     program = Autocompletion()
     program.entrainer('data/data_train.txt')
-    program.sauvegarder_modele('./autocompletion.json')
+    program.sauvegarder_modele('./dictionnaire.json')
     program.charger_evaluation('data/data_test.txt')
     mrr = program.evaluer(-1, 10) # -1 pour prendre toutes les phrases
