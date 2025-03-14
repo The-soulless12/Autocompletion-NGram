@@ -2,11 +2,12 @@ import math
 import json
 import random
 
-class LaplaceBiGram:
+class NGRAM:
     def __init__(self):
         self.uni_grams = {'<s>': 0}
         self.bi_grams = {}
         self.tri_grams = {}
+        self.continuation_counts = {}
 
     def entrainer(self, data):
         self.uni_grams = {'<s>': 0}
@@ -43,7 +44,13 @@ class LaplaceBiGram:
                 prev_prev = prev
                 prev = mot
 
-    def noter(self, past, current, prev_prev=None):
+        for bigram in self.bi_grams.keys():
+            _, word = bigram.split('|')
+            if word not in self.continuation_counts:
+                self.continuation_counts[word] = 0
+                self.continuation_counts[word] += 1
+
+    def noter(self, past, current, D, prev_prev=None):
         bigram_key = f"{past}|{current}"
         trigram_key = f"{prev_prev}|{past}|{current}" if prev_prev else None
 
@@ -53,15 +60,23 @@ class LaplaceBiGram:
         bigram_prev_count = self.bi_grams.get(f"{prev_prev}|{past}", 0) if prev_prev else 0
         vocab_size = len(self.uni_grams)
 
-        # Combinaison des scores avec lissage de Laplace
-        if prev_prev and bigram_prev_count > 0:
-            trigram_score = (trigram_count + 1) / (bigram_prev_count + vocab_size)
-            bigram_score = (bigram_count + 1) / (unigram_count + vocab_size)
-            score = 0.6 * trigram_score + 0.4 * bigram_score  # Pondération
-        else:
-            score = (bigram_count + 1) / (unigram_count + vocab_size)
+        unique_continuations = self.continuation_counts.get(current, 1)
 
-        return math.log(score)
+        # Lissage de Kneser-Ney pour les trigrammes
+        if prev_prev and bigram_prev_count > 0:
+            trigram_prob = max(trigram_count - D, 0) / bigram_prev_count + \
+                           (D / bigram_prev_count) * (bigram_count / unigram_count if unigram_count else 1)
+
+            bigram_prob = max(bigram_count - D, 0) / unigram_count + \
+                          (D / unigram_count) * (unique_continuations / vocab_size)
+
+            score = 0.7 * trigram_prob + 0.3 * bigram_prob  # Pondération
+        else:
+            # Lissage de Kneser-Ney pour les bigrammes
+            score = max(bigram_count - D, 0) / (unigram_count if unigram_count else 1) + \
+                    (D / (unigram_count if unigram_count else 1)) * (unique_continuations / vocab_size)
+
+        return math.log(score) if score > 0 else float('-inf')
 
     def estimer(self, mots):
         dernier_mot = mots[-1] if mots else '<s>'
@@ -70,7 +85,8 @@ class LaplaceBiGram:
 
         for mot in self.uni_grams.keys():
             if mot != '<s>':
-                score = self.noter(dernier_mot, mot, avant_dernier_mot)
+                D = 0.6
+                score = self.noter(dernier_mot, mot, D, avant_dernier_mot)
                 mots_scores.append((mot, score))
 
         return sorted(mots_scores, key=lambda tab: tab[1], reverse=True)
@@ -84,13 +100,13 @@ class LaplaceBiGram:
 
 class Autocompletion():
     def __init__(self):
-        self.modele = LaplaceBiGram()
+        self.modele = NGRAM()
         self.eval = []
 
     def entrainer(self, url):
         f = open(url, 'r', encoding='utf-8')
         data = []
-        for l in f: # la lecture ligne par ligne
+        for l in f:
             phrase = l.strip().lower().split()
             if len(phrase) > 0:
                 data.append(phrase)
@@ -129,9 +145,9 @@ class Autocompletion():
         score = 0.0
         for i in range(n):
             test = S[i]
-            print('-> Proba(', test[1], '|',test[0], ')')
+            print('-> Probabilité(\033[95m', test[1], '\033[0m|',test[0], ')')
             res = self.estimer(test[0], m)
-            print('found:', res)
+            print('\033[38;5;206mSuggestions :\033[0m', res)
             words = [e[0] for e in res]
             try:
                 i = words.index(test[1]) + 1
@@ -147,4 +163,4 @@ if __name__ == '__main__':
     program.entrainer('data/data_train.txt')
     program.sauvegarder_modele('./dictionnaire.json')
     program.charger_evaluation('data/data_test.txt')
-    mrr = program.evaluer(-1, 10) # -1 pour prendre toutes les phrases
+    mrr = program.evaluer(-1, 3) # -1 pour prendre toutes les phrases
