@@ -20,7 +20,8 @@ class NGRAM:
         self.uni_grams = {'<s>': 0}
         self.bi_grams = {}
         self.tri_grams = {}
-        self.continuation_counts = defaultdict(int)
+        self.occurences_suivantes = defaultdict(int)
+        # Elle compte le nombre de fois où un mot apparaît comme second élément d’un bigramme
 
     def entrainer(self, data):
         self.uni_grams = {'<s>': 0}
@@ -59,9 +60,9 @@ class NGRAM:
 
         for bigram in self.bi_grams.keys():
             _, word = bigram.split('|')
-            if word not in self.continuation_counts:
-                self.continuation_counts[word] = 0
-                self.continuation_counts[word] += 1
+            if word not in self.occurences_suivantes:
+                self.occurences_suivantes[word] = 0
+                self.occurences_suivantes[word] += 1
 
     def noter(self, past, current, D, prev_prev=None):
         bigram_key = f"{past}|{current}"
@@ -73,7 +74,7 @@ class NGRAM:
         bigram_prev_count = self.bi_grams.get(f"{prev_prev}|{past}", 0) if prev_prev else 0
         vocab_size = len(self.uni_grams)
 
-        unique_continuations = self.continuation_counts.get(current, 1)
+        unique_continuations = self.occurences_suivantes.get(current, 1)
 
         # Coefficients dynamiques basés sur les fréquences
         λ1 = 0.7 if trigram_count > 0 else 0.4
@@ -86,7 +87,7 @@ class NGRAM:
         
         score = λ1 * trigram_prob + λ2 * bigram_prob + (1 - λ1 - λ2) * unigram_prob
 
-        return math.log(score) if score > 0 else float('-inf')
+        return score*100 if score > 0 else float('-inf')
 
     def estimer(self, mots):
         dernier_mot = mots[-1] if mots else '<s>'
@@ -159,7 +160,7 @@ class Autocompletion():
             print('-> Probabilité(\033[95m', test[1], '\033[0m|',test[0], ')')
             res = self.estimer(test[0], m)
             print('\033[38;5;206mSuggestions :\033[0m', end=" ")
-            print(", ".join(f"\033[38;5;45m{mot}\033[0m: {score:.6f}" for mot, score in res))
+            print(", ".join(f"\033[38;5;45m{mot}\033[0m: {score:.3f} %" for mot, score in res))
 
             words = [e[0] for e in res]
             try:
@@ -176,4 +177,5 @@ if __name__ == '__main__':
     program.entrainer('data/data_train.txt')
     program.sauvegarder_modele('./dictionnaire.json')
     program.charger_evaluation('data/data_test.txt')
-    mrr = program.evaluer(-1, 3) # -1 pour prendre toutes les phrases
+    # -1 pour prendre toutes les phrases et 3 pour afficher uniquement les 3 premières prédictions
+    mrr = program.evaluer(-1, 3)
